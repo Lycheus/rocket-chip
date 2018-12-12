@@ -263,6 +263,7 @@ object Causes {
   val fetch_page_fault = 0xc
   val load_page_fault = 0xd
   val store_page_fault = 0xf
+  val stack_pointer = 0x10
   val all = {
     val res = ArrayBuffer[Int]()
     res += misaligned_fetch
@@ -280,6 +281,7 @@ object Causes {
     res += fetch_page_fault
     res += load_page_fault
     res += store_page_fault
+    res += stack_pointer
     res.toArray
   }
 }

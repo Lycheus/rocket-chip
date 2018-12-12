@@ -475,8 +475,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     wb_reg_pc := mem_reg_pc
   }
 
+  val sp_xcpt = Wire(Bool())
+
   val (wb_xcpt, wb_cause) = checkExceptions(List(
     (wb_reg_xcpt,  wb_reg_cause),
+    (sp_xcpt, UInt(Causes.stack_pointer)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.ma.st, UInt(Causes.misaligned_store)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.ma.ld, UInt(Causes.misaligned_load)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.pf.st, UInt(Causes.store_page_fault)),
@@ -529,10 +532,12 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     ll_waddr := dmem_resp_waddr
     ll_wen := Bool(true)
   }
+  val ll_valid = Wire(init = (ll_waddr =/= 2.U))
 
-  val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
+  val wb_no_xcpt_valid = wb_reg_valid && !replay_wb
+  val wb_valid = wb_no_xcpt_valid  && !wb_xcpt
   val wb_wen = wb_valid && wb_ctrl.wxd
-  val rf_wen = wb_wen || ll_wen
+  val rf_wen = wb_wen || (ll_wen && ll_valid)
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
   val rf_wdata = Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data(xLen-1, 0),
                  Mux(ll_wen, ll_wdata,
@@ -540,6 +545,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
                  Mux(wb_ctrl.mul, mul.map(_.io.resp.bits.data).getOrElse(wb_reg_wdata),
                  wb_reg_wdata))))
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
+
+  // illegal stack pointer write exception logic
+  val sp_unpipelined_xcpt = wb_ctrl.wxd && ((wb_ctrl.mul && !pipelinedMul) || wb_ctrl.div || wb_ctrl.rocc) && (wb_waddr === 2.U)
+  val sp_wb_xcpt = wb_no_xcpt_valid && wb_ctrl.wxd && wb_waddr === 2.U && rf_wdata(3,0) =/= 0.U
+  sp_xcpt := sp_unpipelined_xcpt || sp_wb_xcpt
 
   // hook up control/status regfile
   csr.io.decode(0).csr := id_raw_inst(0)(31,20)
@@ -725,13 +735,15 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   else {
-    printf("C%d: %d [%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
+    printf("C%d: %d [%d] pc=[%x] [%d=%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
          io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception,
-         csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
+         csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0), csr.io.trace(0).exception, csr.io.trace(0).cause,
          Mux(rf_wen && !(wb_set_sboard && wb_wen), rf_waddr, UInt(0)), rf_wdata, rf_wen,
          wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
          csr.io.trace(0).insn, csr.io.trace(0).insn)
+    printf("    [ll_wen=%d] [ll_waddr=%x] [ll_data=%x] [wb_wen=%d] [wb_waddr=%x] [rf_wdata=%x]\n\n", 
+        ll_wen && ll_valid, ll_waddr, ll_wdata, wb_wen, wb_waddr, rf_wdata)
   }
 
   PlusArg.timeout(
