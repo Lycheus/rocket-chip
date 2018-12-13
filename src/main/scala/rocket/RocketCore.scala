@@ -494,7 +494,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     (Causes.store_page_fault, "STORE_PAGE_FAULT"),
     (Causes.load_page_fault, "LOAD_PAGE_FAULT"),
     (Causes.store_access, "STORE_ACCESS"),
-    (Causes.load_access, "LOAD_ACCESS")
+    (Causes.load_access, "LOAD_ACCESS"),
+    (Causes.stack_pointer, "STACK_POINTER")
   )
   coverExceptions(wb_xcpt, wb_cause, "WRITEBACK", wbCoverCauses)
 
@@ -533,7 +534,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     ll_wen := Bool(true)
   }
 
-  val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
+  val wb_insn_valid = !(wb_ctrl.div || wb_ctrl.rocc || { if (pipelinedMul) false.B else wb_ctrl.mul })
+  val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt && wb_insn_valid
   val wb_wen = wb_valid && wb_ctrl.wxd
   val rf_wen = wb_wen || ll_wen
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
@@ -732,15 +734,15 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   else {
-    printf("C%d: %d [%d] pc=[%x] [%d=%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
+    printf("C%d: [%d] [%d] pc=[%x] [%d=%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
          io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception,
          csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0), csr.io.trace(0).exception, csr.io.trace(0).cause,
          Mux(rf_wen && !(wb_set_sboard && wb_wen), rf_waddr, UInt(0)), rf_wdata, rf_wen,
          wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
          csr.io.trace(0).insn, csr.io.trace(0).insn)
-    printf("    [ll_wen=%d] [ll_waddr=%x] [ll_data=%x] [wb_wen=%d] [wb_waddr=%x] [rf_wdata=%x]\n\n", 
-        ll_wen, ll_waddr, ll_wdata, wb_wen, wb_waddr, rf_wdata)
+    printf("    rf_wen[%d] rf_waddr[%x] rf_wdata=[%x]\n    ll_wen[%d] ll_waddr[%x] ll_data[%x]\n    wb_wen[%d] wb_waddr[%x]\n\n", 
+        rf_wen, rf_waddr, rf_wdata, ll_wen, ll_waddr, ll_wdata, wb_wen, wb_waddr)
   }
 
   PlusArg.timeout(
