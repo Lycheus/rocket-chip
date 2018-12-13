@@ -475,8 +475,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     wb_reg_pc := mem_reg_pc
   }
 
+  val sp_xcpt = Wire(Bool())
+  val sp_reg_xcpt = RegInit(Bool(false))
   val (wb_xcpt, wb_cause) = checkExceptions(List(
     (wb_reg_xcpt,  wb_reg_cause),
+    //(sp_xcpt, UInt(Causes.stack_pointer)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.ma.st, UInt(Causes.misaligned_store)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.ma.ld, UInt(Causes.misaligned_load)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.pf.st, UInt(Causes.store_page_fault)),
@@ -484,6 +487,16 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.ae.st, UInt(Causes.store_access)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.ae.ld, UInt(Causes.load_access))
   ))
+
+  val wb_xcpt_real = Wire(Bool())
+  val wb_cause_real = Wire(UInt())
+  when (sp_xcpt) {
+    wb_xcpt_real := sp_xcpt
+    wb_cause_real := UInt(Causes.stack_pointer)
+  } .otherwise {
+    wb_xcpt_real := wb_xcpt
+    wb_cause_real := wb_cause
+  }
 
   val wbCoverCauses = List(
     (Causes.misaligned_store, "MISALIGNED_STORE"),
@@ -500,7 +513,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val replay_wb_common = io.dmem.s2_nack || wb_reg_replay
   val replay_wb_rocc = wb_reg_valid && wb_ctrl.rocc && !io.rocc.cmd.ready
   val replay_wb = replay_wb_common || replay_wb_rocc
-  take_pc_wb := replay_wb || wb_xcpt || csr.io.eret || wb_reg_flush_pipe
+  take_pc_wb := replay_wb || wb_xcpt_real || csr.io.eret || wb_reg_flush_pipe
 
   // writeback arbitration
   val dmem_resp_xpu = !io.dmem.resp.bits.tag(0).toBool
@@ -529,8 +542,10 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     ll_waddr := dmem_resp_waddr
     ll_wen := Bool(true)
   }
-
+  //FIXME Tuo: false comb loop check in firrtl!
+  //Use another datapath?
   val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
+  val wb_valid_real = wb_valid && !sp_xcpt
   val wb_wen = wb_valid && wb_ctrl.wxd
   val rf_wen = wb_wen || ll_wen
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
@@ -539,13 +554,30 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
                  Mux(wb_ctrl.mul, mul.map(_.io.resp.bits.data).getOrElse(wb_reg_wdata),
                  wb_reg_wdata))))
-  when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
+  when (rf_wen) {
+    rf.write(rf_waddr, rf_wdata)
+    printf("write %x @R[%d]\n",rf_wdata,rf_waddr)
+  }
+
+  sp_xcpt := rf_wen && (rf_waddr === 2.U) && (rf_wdata(3,0) =/= 0.U) && !sp_reg_xcpt
+
+  when (!sp_xcpt) {
+    sp_reg_xcpt :=  Bool(false)
+  } .otherwise {//sp_xcpt = 1
+    when (!sp_reg_xcpt) {
+      sp_reg_xcpt :=  Bool(true)
+      printf("Alarm!!! Stack pointer unaligned write detected!\n")
+    }
+  }
+
+  printf("rf_wen=%b rf_waddr=%d rf_wdata=%x sp_xcpt=%b wb_xcpt=%b sp_reg_xcpt:%b\n",
+    rf_wen, rf_waddr, rf_wdata, sp_xcpt, wb_xcpt, sp_reg_xcpt)
 
   // hook up control/status regfile
   csr.io.decode(0).csr := id_raw_inst(0)(31,20)
-  csr.io.exception := wb_xcpt
-  csr.io.cause := wb_cause
-  csr.io.retire := wb_valid
+  csr.io.exception := wb_xcpt_real
+  csr.io.cause := wb_cause_real
+  csr.io.retire := wb_valid_real
   csr.io.inst(0) := (if (usingCompressed) Cat(Mux(wb_reg_raw_inst(1, 0).andR, wb_reg_inst >> 16, 0.U), wb_reg_raw_inst(15, 0)) else wb_reg_inst)
   csr.io.interrupts := io.interrupts
   csr.io.hartid := io.hartid
@@ -607,7 +639,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
 
   val id_stall_fpu = if (usingFPU) {
     val fp_sboard = new Scoreboard(32)
-    fp_sboard.set((wb_dcache_miss && wb_ctrl.wfd || io.fpu.sboard_set) && wb_valid, wb_waddr)
+    //fp_sboard.set((wb_dcache_miss && wb_ctrl.wfd || io.fpu.sboard_set) && wb_valid, wb_waddr)
+    fp_sboard.set((wb_dcache_miss && wb_ctrl.wfd || io.fpu.sboard_set) && wb_valid_real, wb_waddr)
     fp_sboard.clear(dmem_resp_replay && dmem_resp_fpu, dmem_resp_waddr)
     fp_sboard.clear(io.fpu.sboard_clr, io.fpu.sboard_clra)
 
@@ -617,7 +650,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val dcache_blocked = Reg(Bool())
   dcache_blocked := !io.dmem.req.ready && (io.dmem.req.valid || dcache_blocked)
   val rocc_blocked = Reg(Bool())
-  rocc_blocked := !wb_xcpt && !io.rocc.cmd.ready && (io.rocc.cmd.valid || rocc_blocked)
+  rocc_blocked := !wb_xcpt_real && !io.rocc.cmd.ready && (io.rocc.cmd.valid || rocc_blocked)
 
   val ctrl_stalld =
     id_ex_hazard || id_mem_hazard || id_wb_hazard || id_sboard_hazard ||
@@ -630,10 +663,14 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     csr.io.csr_stall
   ctrl_killd := !ibuf.io.inst(0).valid || ibuf.io.inst(0).bits.replay || take_pc_mem_wb || ctrl_stalld || csr.io.interrupt
 
+  printf("id_ctrl.mul/div:%b,%b ex_ctrl.mul/div:%b,%b mem_ctrl.mul:%b,%b wb_ctrl.mul:%b,%b idexh:%b idmemh:%b idwbh:%b stall:%b\n",
+    id_ctrl.mul, id_ctrl.div, ex_ctrl.mul, ex_ctrl.div, mem_ctrl.mul, mem_ctrl.div, wb_ctrl.mul, wb_ctrl.mul,
+    id_ex_hazard, id_mem_hazard,id_wb_hazard,ctrl_stalld)
+
   io.imem.req.valid := take_pc
   io.imem.req.bits.speculative := !take_pc_wb
   io.imem.req.bits.pc :=
-    Mux(wb_xcpt || csr.io.eret, csr.io.evec, // exception or [m|s]ret
+    Mux(wb_xcpt_real || csr.io.eret, csr.io.evec, // exception or [m|s]ret
     Mux(replay_wb,              wb_reg_pc,   // replay
                                 mem_npc))    // flush or branch misprediction
   io.imem.flush_icache := wb_reg_valid && wb_ctrl.fence_i && !io.dmem.s2_nack
@@ -683,12 +720,12 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   io.dmem.req.bits.typ  := ex_ctrl.mem_type
   io.dmem.req.bits.phys := Bool(false)
   io.dmem.req.bits.addr := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
-  io.dmem.invalidate_lr := wb_xcpt
+  io.dmem.invalidate_lr := wb_xcpt_real
   io.dmem.s1_data.data := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
   io.dmem.s1_kill := killm_common || mem_ldst_xcpt
 
   io.rocc.cmd.valid := wb_reg_valid && wb_ctrl.rocc && !replay_wb_common
-  io.rocc.exception := wb_xcpt && csr.io.status.xs.orR
+  io.rocc.exception := wb_xcpt_real && csr.io.status.xs.orR
   io.rocc.cmd.bits.status := csr.io.status
   io.rocc.cmd.bits.inst := new RoCCInstruction().fromBits(wb_reg_inst)
   io.rocc.cmd.bits.rs1 := wb_reg_wdata
