@@ -475,7 +475,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     wb_reg_pc := mem_reg_pc
   }
 
-  val sp_xcpt = Wire(Bool())
+  val sp_xcpt = RegInit(false.B)
 
   val (wb_xcpt, wb_cause) = checkExceptions(List(
     (wb_reg_xcpt,  wb_reg_cause),
@@ -532,12 +532,10 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     ll_waddr := dmem_resp_waddr
     ll_wen := Bool(true)
   }
-  val ll_valid = Wire(init = (ll_waddr =/= 2.U))
 
-  val wb_no_xcpt_valid = wb_reg_valid && !replay_wb
-  val wb_valid = wb_no_xcpt_valid  && !wb_xcpt
+  val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
   val wb_wen = wb_valid && wb_ctrl.wxd
-  val rf_wen = wb_wen || (ll_wen && ll_valid)
+  val rf_wen = wb_wen || ll_wen
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
   val rf_wdata = Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data(xLen-1, 0),
                  Mux(ll_wen, ll_wdata,
@@ -547,9 +545,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
 
   // illegal stack pointer write exception logic
-  val sp_unpipelined_xcpt = wb_ctrl.wxd && ((wb_ctrl.mul && !pipelinedMul) || wb_ctrl.div || wb_ctrl.rocc) && (wb_waddr === 2.U)
-  val sp_wb_xcpt = wb_no_xcpt_valid && wb_ctrl.wxd && wb_waddr === 2.U && rf_wdata(3,0) =/= 0.U
-  sp_xcpt := sp_unpipelined_xcpt || sp_wb_xcpt
+  val sp_alignment_xcpt = rf_wen && rf_waddr === 2.U && rf_wdata(3,0) =/= 0.U
+  sp_xcpt := sp_alignment_xcpt
 
   // hook up control/status regfile
   csr.io.decode(0).csr := id_raw_inst(0)(31,20)
@@ -743,7 +740,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
          csr.io.trace(0).insn, csr.io.trace(0).insn)
     printf("    [ll_wen=%d] [ll_waddr=%x] [ll_data=%x] [wb_wen=%d] [wb_waddr=%x] [rf_wdata=%x]\n\n", 
-        ll_wen && ll_valid, ll_waddr, ll_wdata, wb_wen, wb_waddr, rf_wdata)
+        ll_wen, ll_waddr, ll_wdata, wb_wen, wb_waddr, rf_wdata)
   }
 
   PlusArg.timeout(

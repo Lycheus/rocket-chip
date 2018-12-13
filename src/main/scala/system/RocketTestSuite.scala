@@ -126,7 +126,7 @@ object DefaultTestSuites {
   val rv32i = List(rv32ui, rv32si, rv32mi)
   val rv32pi = List(rv32ui, rv32mi)
 
-  val rv64uiNames = LinkedHashSet("addw", "addiw", "ld", "lwu", "sd", "slliw", "sllw", "sltiu", "sltu", "sraiw", "sraw", "srliw", "srlw", "subw", "spe")
+  val rv64uiNames = LinkedHashSet("addw", "addiw", "ld", "lwu", "sd", "slliw", "sllw", "sltiu", "sltu", "sraiw", "sraw", "srliw", "srlw", "subw", "sp_addi", "sp_div", "sp_dmem", "spe", "spe_unimp", "sp_mul")
   val rv64ui = new AssemblyTestSuite("rv64ui", rv32uiNames ++ rv64uiNames)(_)
 
   val rv64umNames = LinkedHashSet("divuw", "divw", "mulw", "remuw", "remw")
