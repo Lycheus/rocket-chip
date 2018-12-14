@@ -475,7 +475,9 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     wb_reg_pc := mem_reg_pc
   }
 
-  val sp_xcpt = RegInit(false.B)
+  val sp_xcpt = Wire(init = false.B)
+  val sp_xcpt_waiting = RegInit(false.B)
+  val sp_reg_pc = RegNext(wb_reg_pc)
 
   val (wb_xcpt, wb_cause) = checkExceptions(List(
     (wb_reg_xcpt,  wb_reg_cause),
@@ -494,8 +496,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     (Causes.store_page_fault, "STORE_PAGE_FAULT"),
     (Causes.load_page_fault, "LOAD_PAGE_FAULT"),
     (Causes.store_access, "STORE_ACCESS"),
-    (Causes.load_access, "LOAD_ACCESS"),
-    (Causes.stack_pointer, "STACK_POINTER")
+    (Causes.load_access, "LOAD_ACCESS")
   )
   coverExceptions(wb_xcpt, wb_cause, "WRITEBACK", wbCoverCauses)
 
@@ -535,9 +536,9 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   }
 
   val wb_insn_valid = !(wb_ctrl.div || wb_ctrl.rocc || { if (pipelinedMul) false.B else wb_ctrl.mul })
-  val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt && wb_insn_valid
+  val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
   val wb_wen = wb_valid && wb_ctrl.wxd
-  val rf_wen = wb_wen || ll_wen
+  val rf_wen = (wb_wen && wb_insn_valid) || ll_wen
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
   val rf_wdata = Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data(xLen-1, 0),
                  Mux(ll_wen, ll_wdata,
@@ -547,8 +548,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
 
   // illegal stack pointer write exception logic
+  val sp_next_insn = sp_reg_pc =/= wb_reg_pc
   val sp_alignment_xcpt = rf_wen && rf_waddr === 2.U && rf_wdata(3,0) =/= 0.U
-  sp_xcpt := sp_alignment_xcpt
+
+  sp_xcpt_waiting := Mux(sp_next_insn, sp_alignment_xcpt, sp_xcpt_waiting || sp_alignment_xcpt)
+  sp_xcpt := Mux(sp_next_insn, sp_xcpt_waiting, false.B)
 
   // hook up control/status regfile
   csr.io.decode(0).csr := id_raw_inst(0)(31,20)
@@ -741,8 +745,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
          wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
          csr.io.trace(0).insn, csr.io.trace(0).insn)
-    printf("    rf_wen[%d] rf_waddr[%x] rf_wdata=[%x]\n    ll_wen[%d] ll_waddr[%x] ll_data[%x]\n    wb_wen[%d] wb_waddr[%x]\n\n", 
+    printf("    rf_wen[%d] rf_waddr[%x] rf_wdata=[%x]\n    ll_wen[%d] ll_waddr[%x] ll_data[%x]\n    wb_wen[%d] wb_waddr[%x]\n", 
         rf_wen, rf_waddr, rf_wdata, ll_wen, ll_waddr, ll_wdata, wb_wen, wb_waddr)
+    printf("sp_xcpt[%d] sp_xcpt_waiting[%d] sp_next_insn[%d] sp_alignment_xcpt[%d]\n\n",
+           sp_xcpt, sp_xcpt_waiting, sp_next_insn, sp_alignment_xcpt)
+
   }
 
   PlusArg.timeout(
