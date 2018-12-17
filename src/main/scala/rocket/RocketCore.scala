@@ -552,7 +552,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val sp_alignment_xcpt = rf_wen && rf_waddr === 2.U && rf_wdata(3,0) =/= 0.U
 
   sp_xcpt_waiting := Mux(sp_next_insn, sp_alignment_xcpt, sp_xcpt_waiting || sp_alignment_xcpt)
-  sp_xcpt := Mux(sp_next_insn, sp_xcpt_waiting, false.B)
+  sp_xcpt := Mux(sp_next_insn, sp_xcpt_waiting, false.B) && csr.io.spsec.align
 
   // hook up control/status regfile
   csr.io.decode(0).csr := id_raw_inst(0)(31,20)

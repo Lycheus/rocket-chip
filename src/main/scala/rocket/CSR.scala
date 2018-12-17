@@ -63,6 +63,10 @@ class DCSR extends Bundle {
   val prv = UInt(width = PRV.SZ)
 }
 
+class SPSec extends Bundle {
+  val align = Bool()
+}
+
 class MIP(implicit p: Parameters) extends CoreBundle()(p)
     with HasCoreParameters {
   val lip = Vec(coreParams.nLocalInterrupts, Bool())
@@ -208,6 +212,7 @@ class CSRFileIO(implicit p: Parameters) extends CoreBundle
   val counters = Vec(nPerfCounters, new PerfCounterIO)
   val inst = Vec(retireWidth, UInt(width = iLen)).asInput
   val trace = Vec(retireWidth, new TracedInstruction).asOutput
+  val spsec = new SPSec().asOutput
 }
 
 class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Parameters) extends CoreModule()(p)
@@ -218,6 +223,8 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
   reset_mstatus.mpp := PRV.M
   reset_mstatus.prv := PRV.M
   val reg_mstatus = Reg(init=reset_mstatus)
+
+  val reg_spsec = RegInit(0.U(xLen))
 
   val new_prv = Wire(init = reg_mstatus.prv)
   reg_mstatus.prv := legalizePrivilege(new_prv)
@@ -360,7 +367,8 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
     CSRs.mepc -> readEPC(reg_mepc).sextTo(xLen),
     CSRs.mbadaddr -> reg_mbadaddr.sextTo(xLen),
     CSRs.mcause -> reg_mcause,
-    CSRs.mhartid -> io.hartid)
+    CSRs.mhartid -> io.hartid,
+    CSRs.mspsec -> reg_spsec)
 
   val debug_csrs = LinkedHashMap[Int,Bits](
     CSRs.dcsr -> reg_dcsr.asUInt,
@@ -513,6 +521,8 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
   io.status.dprv := Reg(next = Mux(reg_mstatus.mprv && !reg_debug, reg_mstatus.mpp, reg_mstatus.prv))
   if (xLen == 32)
     io.status.sd_rv32 := io.status.sd
+
+  io.spsec.align := reg_spsec(0)
 
   val exception = insn_call || insn_break || io.exception
   assert(PopCount(insn_ret :: insn_call :: insn_break :: io.exception :: Nil) <= 1, "these conditions must be mutually exclusive")
@@ -754,6 +764,7 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
         pmp.addr := wdata
       }
     }
+    when (decoded_addr(CSRs.mspsec)) { reg_spsec := wdata }
   }
 
   if (!usingVM) {
