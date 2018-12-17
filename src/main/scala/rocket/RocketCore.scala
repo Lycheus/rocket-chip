@@ -549,10 +549,13 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
 
   // illegal stack pointer write exception logic
   val sp_next_insn = sp_reg_pc =/= wb_reg_pc
-  val sp_alignment_xcpt = rf_wen && rf_waddr === 2.U && rf_wdata(3,0) =/= 0.U
+  val sp_write = rf_wen && rf_waddr === 2.U
+  val sp_alignment_xcpt = sp_write && rf_wdata(3,0) =/= 0.U && csr.io.spsec.align
+  val sp_bound_xcpt = sp_write && (rf_wdata > csr.io.spsec.max || rf_wdata < csr.io.spsec.min) && csr.io.spsec.bound
+  val sp_combined_xcpt = sp_alignment_xcpt || sp_bound_xcpt
 
-  sp_xcpt_waiting := Mux(sp_next_insn, sp_alignment_xcpt, sp_xcpt_waiting || sp_alignment_xcpt)
-  sp_xcpt := Mux(sp_next_insn, sp_xcpt_waiting, false.B) && csr.io.spsec.align
+  sp_xcpt_waiting := Mux(sp_next_insn, sp_combined_xcpt, sp_xcpt_waiting || sp_combined_xcpt)
+  sp_xcpt := Mux(sp_next_insn, sp_xcpt_waiting, false.B)
 
   // hook up control/status regfile
   csr.io.decode(0).csr := id_raw_inst(0)(31,20)
@@ -747,8 +750,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
          csr.io.trace(0).insn, csr.io.trace(0).insn)
     printf("    rf_wen[%d] rf_waddr[%x] rf_wdata=[%x]\n    ll_wen[%d] ll_waddr[%x] ll_data[%x]\n    wb_wen[%d] wb_waddr[%x]\n", 
         rf_wen, rf_waddr, rf_wdata, ll_wen, ll_waddr, ll_wdata, wb_wen, wb_waddr)
-    printf("sp_xcpt[%d] sp_xcpt_waiting[%d] sp_next_insn[%d] sp_alignment_xcpt[%d]\n\n",
-           sp_xcpt, sp_xcpt_waiting, sp_next_insn, sp_alignment_xcpt)
+    printf("    sp_xcpt[%d] sp_xcpt_waiting[%d] sp_alignment_xcpt[%d] sp_bound_xcpt[%d] sp_next_insn[%d]\n\n",
+           sp_xcpt, sp_xcpt_waiting, sp_alignment_xcpt, sp_bound_xcpt, sp_next_insn)
 
   }
 

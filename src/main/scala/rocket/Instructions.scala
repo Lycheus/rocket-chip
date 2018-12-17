@@ -498,6 +498,8 @@ object CSRs {
   val mhpmcounter30h = 0xb9e
   val mhpmcounter31h = 0xb9f
   val mspsec = 0x7c0
+  val mspmin = 0x7c1
+  val mspmax = 0x7c2
   val all = {
     val res = ArrayBuffer[Int]()
     res += fflags
@@ -648,6 +650,9 @@ object CSRs {
     res += marchid
     res += mimpid
     res += mhartid
+    res += mspsec
+    res += mspmin
+    res += mspmax
     res.toArray
   }
   val all32 = {
@@ -715,7 +720,6 @@ object CSRs {
     res += mhpmcounter29h
     res += mhpmcounter30h
     res += mhpmcounter31h
-    res += mspsec
     res.toArray
   }
 }

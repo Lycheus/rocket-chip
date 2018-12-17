@@ -63,8 +63,11 @@ class DCSR extends Bundle {
   val prv = UInt(width = PRV.SZ)
 }
 
-class SPSec extends Bundle {
+class SPSec(implicit p: Parameters) extends CoreBundle()(p) with HasCoreParameters {
   val align = Bool()
+  val bound = Bool()
+  val min = UInt(width = xLen)
+  val max = UInt(width = xLen)
 }
 
 class MIP(implicit p: Parameters) extends CoreBundle()(p)
@@ -224,7 +227,8 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
   reset_mstatus.prv := PRV.M
   val reg_mstatus = Reg(init=reset_mstatus)
 
-  val reg_spsec = RegInit(0.U(xLen))
+  val reset_spsec = Wire(init=new SPSec().fromBits(0))
+  val reg_spsec = Reg(init=reset_spsec)
 
   val new_prv = Wire(init = reg_mstatus.prv)
   reg_mstatus.prv := legalizePrivilege(new_prv)
@@ -368,7 +372,9 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
     CSRs.mbadaddr -> reg_mbadaddr.sextTo(xLen),
     CSRs.mcause -> reg_mcause,
     CSRs.mhartid -> io.hartid,
-    CSRs.mspsec -> reg_spsec)
+    CSRs.mspsec -> Cat(reg_spsec.bound, reg_spsec.align).asUInt.sextTo(xLen),
+    CSRs.mspmin -> reg_spsec.min,
+    CSRs.mspmax -> reg_spsec.max)
 
   val debug_csrs = LinkedHashMap[Int,Bits](
     CSRs.dcsr -> reg_dcsr.asUInt,
@@ -522,7 +528,7 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
   if (xLen == 32)
     io.status.sd_rv32 := io.status.sd
 
-  io.spsec.align := reg_spsec(0)
+  io.spsec := reg_spsec
 
   val exception = insn_call || insn_break || io.exception
   assert(PopCount(insn_ret :: insn_call :: insn_break :: io.exception :: Nil) <= 1, "these conditions must be mutually exclusive")
@@ -764,7 +770,12 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
         pmp.addr := wdata
       }
     }
-    when (decoded_addr(CSRs.mspsec)) { reg_spsec := wdata }
+    when (decoded_addr(CSRs.mspsec)) { 
+        reg_spsec.align := wdata(0)
+        reg_spsec.bound := wdata(1)
+    }
+    when (decoded_addr(CSRs.mspmax)) { reg_spsec.max := wdata }
+    when (decoded_addr(CSRs.mspmin)) { reg_spsec.min := wdata }
   }
 
   if (!usingVM) {
