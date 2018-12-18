@@ -64,8 +64,10 @@ class DCSR extends Bundle {
 }
 
 class SPSec(implicit p: Parameters) extends CoreBundle()(p) with HasCoreParameters {
-  val align = Bool()
-  val bound = Bool()
+  val ctrl = new Bundle {
+      val align = Bool()
+      val bound = Bool()
+  }
   val min = UInt(width = xLen)
   val max = UInt(width = xLen)
 }
@@ -372,7 +374,7 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
     CSRs.mbadaddr -> reg_mbadaddr.sextTo(xLen),
     CSRs.mcause -> reg_mcause,
     CSRs.mhartid -> io.hartid,
-    CSRs.mspsec -> Cat(reg_spsec.bound, reg_spsec.align).asUInt.sextTo(xLen),
+    CSRs.mspsec -> reg_spsec.ctrl.asUInt.sextTo(xLen),
     CSRs.mspmin -> reg_spsec.min,
     CSRs.mspmax -> reg_spsec.max)
 
@@ -770,12 +772,9 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
         pmp.addr := wdata
       }
     }
-    when (decoded_addr(CSRs.mspsec)) { 
-        reg_spsec.align := wdata(0)
-        reg_spsec.bound := wdata(1)
-    }
-    when (decoded_addr(CSRs.mspmax)) { reg_spsec.max := wdata }
-    when (decoded_addr(CSRs.mspmin)) { reg_spsec.min := wdata }
+    when (decoded_addr(CSRs.mspsec)) { reg_spsec.ctrl := reg_spsec.ctrl.fromBits(wdata) }
+    when (decoded_addr(CSRs.mspmax)) { reg_spsec.max  := wdata }
+    when (decoded_addr(CSRs.mspmin)) { reg_spsec.min  := wdata }
   }
 
   if (!usingVM) {
