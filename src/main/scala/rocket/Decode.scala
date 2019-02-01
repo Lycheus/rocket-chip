@@ -14,7 +14,7 @@ object DecodeLogic
       cache.getOrElseUpdate(t, (if (t.mask == 0) addr else addr & Bits(BigInt(2).pow(addrWidth)-(t.mask+1), addrWidth)) === Bits(t.value, addrWidth))
     }.foldLeft(Bool(false))(_||_)
   }
-	def apply(addr: UInt, default: BitPat, mapping: Iterable[(BitPat, BitPat)]): UInt = {
+  def apply(addr: UInt, default: BitPat, mapping: Iterable[(BitPat, BitPat)]): UInt = {
     val cache = caches.getOrElseUpdate(addr, Map[Term,Bool]())
     val dterm = term(default)
     val (keys, values) = mapping.unzip

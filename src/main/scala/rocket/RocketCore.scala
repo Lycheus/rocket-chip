@@ -115,6 +115,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     ((xLen > 32).option(new I64Decode)) ++:
     (usingVM.option(new SDecode)) ++:
     (usingDebug.option(new DebugDecode)) ++:
+    Seq(new BoundDecode) ++:
     Seq(new IDecode)
   } flatMap(_.table)
 
@@ -273,6 +274,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val ex_reg_rs_msb = Reg(Vec(id_raddr.size, UInt()))
   val ex_rs = for (i <- 0 until id_raddr.size)
     yield Mux(ex_reg_rs_bypass(i), bypass_mux(ex_reg_rs_lsb(i)), Cat(ex_reg_rs_msb(i), ex_reg_rs_lsb(i)))
+
   val ex_imm = ImmGen(ex_ctrl.sel_imm, ex_reg_inst)
   val ex_op1 = MuxLookup(ex_ctrl.sel_alu1, SInt(0), Seq(
     A1_RS1 -> ex_rs(0).asSInt,
@@ -344,6 +346,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
         ex_reg_rs_msb(i) := id_rs(i) >> log2Ceil(bypass_sources.size)
       }
     }
+
     when (id_illegal_insn) {
       val inst = Mux(ibuf.io.inst(0).bits.rvc, id_raw_inst(0)(15, 0), id_raw_inst(0))
       ex_reg_rs_bypass(0) := false
@@ -725,9 +728,9 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   else {
-    printf("C%d: %d [%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
-         io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception,
-         csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
+    printf("C%d: %d [%d] B[%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
+         io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception, 
+         wb_ctrl.wbd, csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
          Mux(rf_wen && !(wb_set_sboard && wb_wen), rf_waddr, UInt(0)), rf_wdata, rf_wen,
          wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
