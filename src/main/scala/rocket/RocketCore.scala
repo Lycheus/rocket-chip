@@ -119,6 +119,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     Seq(new IDecode)
   } flatMap(_.table)
 
+  val bcdc = new BoundCodec(xLen)
+
+  val mem_reg_bound = Reg(UInt())
+  val wb_reg_bound = Reg(UInt())
+
   val ex_ctrl = Reg(new IntCtrlSigs)
   val mem_ctrl = Reg(new IntCtrlSigs)
   val wb_ctrl = Reg(new IntCtrlSigs)
@@ -194,6 +199,9 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val id_rs = id_raddr.map(rf.read _)
   val ctrl_killd = Wire(Bool())
   val id_npc = (ibuf.io.pc.asSInt + ImmGen(IMM_UJ, id_inst(0))).asUInt
+
+  val brf = new RegFile(31, bcdc.width)
+  val id_brs = id_raddr.map(brf.read _)
 
   val csr = Module(new CSRFile(perfEvents))
   val id_csr_en = id_ctrl.csr.isOneOf(CSR.S, CSR.C, CSR.W)
@@ -274,6 +282,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val ex_reg_rs_msb = Reg(Vec(id_raddr.size, UInt()))
   val ex_rs = for (i <- 0 until id_raddr.size)
     yield Mux(ex_reg_rs_bypass(i), bypass_mux(ex_reg_rs_lsb(i)), Cat(ex_reg_rs_msb(i), ex_reg_rs_lsb(i)))
+
+  val ex_brs = id_brs.map(RegNext(_))
 
   val ex_imm = ImmGen(ex_ctrl.sel_imm, ex_reg_inst)
   val ex_op1 = MuxLookup(ex_ctrl.sel_alu1, SInt(0), Seq(
@@ -424,9 +434,13 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     mem_reg_wdata := alu.io.out
     mem_br_taken := alu.io.cmp_out
 
+    mem_reg_bound := bcdc.propagate(ex_brs(0), ex_brs(1))
+
     when (ex_ctrl.rxs2 && (ex_ctrl.mem || ex_ctrl.rocc || ex_sfence)) {
       val typ = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_ctrl.mem_type)
       mem_reg_rs2 := new StoreGen(typ, 0.U, ex_rs(1), coreDataBytes).data
+    } .elsewhen (ex_ctrl.wbd) {
+      mem_reg_rs2 := ex_rs(0)
     }
     when (ex_ctrl.jalr && csr.io.status.debug) {
       // flush I$ on D-mode JALR to effect uncached fetch without D$ flush
@@ -469,13 +483,15 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     wb_ctrl := mem_ctrl
     wb_reg_sfence := mem_reg_sfence
     wb_reg_wdata := Mux(!mem_reg_xcpt && mem_ctrl.fp && mem_ctrl.wxd, io.fpu.toint_data, mem_int_wdata)
-    when (mem_ctrl.rocc || mem_reg_sfence) {
+    when (mem_ctrl.rocc || mem_reg_sfence || mem_ctrl.wbd) {
       wb_reg_rs2 := mem_reg_rs2
     }
     wb_reg_cause := mem_cause
     wb_reg_inst := mem_reg_inst
     wb_reg_raw_inst := mem_reg_raw_inst
     wb_reg_pc := mem_reg_pc
+
+    wb_reg_bound := mem_reg_bound
   }
 
   val (wb_xcpt, wb_cause) = checkExceptions(List(
@@ -543,6 +559,12 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
                  Mux(wb_ctrl.mul, mul.map(_.io.resp.bits.data).getOrElse(wb_reg_wdata),
                  wb_reg_wdata))))
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
+
+  when (wb_wen) { 
+    brf.write(wb_waddr, wb_reg_bound) 
+  } .elsewhen (wb_valid && wb_ctrl.wbd) { 
+    brf.write(wb_waddr, bcdc.encode(wb_reg_wdata, wb_reg_rs2))
+  }
 
   // hook up control/status regfile
   csr.io.decode(0).csr := id_raw_inst(0)(31,20)
@@ -728,13 +750,15 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   else {
-    printf("C%d: %d [%d] B[%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
+    printf("C%d: %d [%d] B[%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x) [%x %x %x] [%x %x]\n",
          io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception, 
          wb_ctrl.wbd, csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
          Mux(rf_wen && !(wb_set_sboard && wb_wen), rf_waddr, UInt(0)), rf_wdata, rf_wen,
          wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
-         csr.io.trace(0).insn, csr.io.trace(0).insn)
+         csr.io.trace(0).insn, csr.io.trace(0).insn,
+         bcdc.bounded(wb_reg_bound), bcdc.upper(wb_reg_bound), bcdc.lower(wb_reg_bound),
+         wb_reg_wdata, wb_reg_rs2)
   }
 
   PlusArg.timeout(
@@ -779,6 +803,17 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
       ens = ens || en
       when (ens) { _r := _next }
     }
+  }
+}
+
+class BoundCodec(w: Int) {
+  val width = 2*w + 1
+  def encode(upper: UInt, lower: UInt) = true.B##upper##lower
+  def bounded(bound: UInt) = bound(width-1)
+  def upper(bound: UInt) = bound(width-2, width-w-1)
+  def lower(bound: UInt) = bound(width-w-2, 0)
+  def propagate(brs1: UInt, brs2: UInt) = {
+    Mux(bounded(brs1), Mux(bounded(brs2), 0.U, brs1), Mux(bounded(brs2), brs2, 0.U))
   }
 }
 
