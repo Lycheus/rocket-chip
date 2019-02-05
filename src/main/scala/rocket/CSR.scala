@@ -63,6 +63,11 @@ class DCSR extends Bundle {
   val prv = UInt(width = PRV.SZ)
 }
 
+class BoundsCSR(implicit p: Parameters) extends CoreBundle()(p) {
+  val bnden = Bool()
+  val smbase = UInt(width=xLen - 1)
+}
+
 class MIP(implicit p: Parameters) extends CoreBundle()(p)
     with HasCoreParameters {
   val lip = Vec(coreParams.nLocalInterrupts, Bool())
@@ -208,6 +213,7 @@ class CSRFileIO(implicit p: Parameters) extends CoreBundle
   val counters = Vec(nPerfCounters, new PerfCounterIO)
   val inst = Vec(retireWidth, UInt(width = iLen)).asInput
   val trace = Vec(retireWidth, new TracedInstruction).asOutput
+  val bounds = new BoundsCSR().asOutput
 }
 
 class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Parameters) extends CoreModule()(p)
@@ -218,6 +224,9 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
   reset_mstatus.mpp := PRV.M
   reset_mstatus.prv := PRV.M
   val reg_mstatus = Reg(init=reset_mstatus)
+
+  val reset_bounds = Wire(init=new BoundsCSR().fromBits(0))
+  val reg_bounds = Reg(init=reset_bounds)
 
   val new_prv = Wire(init = reg_mstatus.prv)
   reg_mstatus.prv := legalizePrivilege(new_prv)
@@ -343,6 +352,7 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
   val isaMax = (BigInt(log2Ceil(xLen) - 4) << (xLen-2)) | isaStringToMask(isaString)
   val reg_misa = Reg(init=UInt(isaMax))
   val read_mstatus = io.status.asUInt()(xLen-1,0)
+  val read_bounds = io.bounds.asUInt()(xLen-1,0)
 
   val read_mapping = LinkedHashMap[Int,Bits](
     CSRs.tselect -> reg_tselect,
@@ -360,7 +370,8 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
     CSRs.mepc -> readEPC(reg_mepc).sextTo(xLen),
     CSRs.mbadaddr -> reg_mbadaddr.sextTo(xLen),
     CSRs.mcause -> reg_mcause,
-    CSRs.mhartid -> io.hartid)
+    CSRs.mhartid -> io.hartid,
+    CSRs.bounds -> read_bounds)
 
   val debug_csrs = LinkedHashMap[Int,Bits](
     CSRs.dcsr -> reg_dcsr.asUInt,
@@ -513,6 +524,8 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
   io.status.dprv := Reg(next = Mux(reg_mstatus.mprv && !reg_debug, reg_mstatus.mpp, reg_mstatus.prv))
   if (xLen == 32)
     io.status.sd_rv32 := io.status.sd
+
+  io.bounds := reg_bounds
 
   val exception = insn_call || insn_break || io.exception
   assert(PopCount(insn_ret :: insn_call :: insn_break :: io.exception :: Nil) <= 1, "these conditions must be mutually exclusive")
@@ -753,6 +766,10 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
       when (decoded_addr(CSRs.pmpaddr0 + i) && !pmp.addrLocked(next)) {
         pmp.addr := wdata
       }
+    }
+    when (decoded_addr(CSRs.bounds)) { 
+      reg_bounds.smbase := wdata(xLen-2,0) 
+      reg_bounds.bnden  := wdata(xLen-1)
     }
   }
 

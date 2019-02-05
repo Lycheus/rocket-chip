@@ -789,14 +789,14 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     val brs = ex_brs.map{ b: UInt => RegNext(RegNext(b)) }
     val src = id_bnd_bypass_src.map{ b: Seq[UInt] => RegNext(RegNext(RegNext(b.foldLeft(0.U)(_##_.asUInt())))) }
     val byp = RegNext(RegNext(ex_reg_brs_bypass.foldLeft(0.U)(_##_.asUInt())(1,0)))
-    printf("C%d: %d [%d] [B%d P%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x) [%b %b %b] [%x %x %x] [%x %x %x] [%x %x %x] [%x %x]\n",
+    printf("C%d: %d [%d] [SM%d HI%d] [B%d P%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x) [SMB%x BE%d] [%b %b %b] [%x %x %x] [%x %x %x] [%x %x %x] [%x %x]\n",
          io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception, 
-         wb_ctrl.wbd, wb_reg_prop, csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
+         wb_ctrl.sm, wb_ctrl.bdhi, wb_ctrl.wbd, wb_reg_prop, csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
          Mux(rf_wen && !(wb_set_sboard && wb_wen), rf_waddr, UInt(0)), rf_wdata, rf_wen,
          wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
          csr.io.trace(0).insn, csr.io.trace(0).insn, 
-         byp, src(0), src(1),
+         csr.io.bounds.smbase, csr.io.bounds.bnden, byp, src(0), src(1),
          bcdc.bounded(wb_reg_bound), bcdc.upper(wb_reg_bound), bcdc.lower(wb_reg_bound),
          bcdc.bounded(brs(0)), bcdc.upper(brs(0)), bcdc.lower(brs(0)),
          bcdc.bounded(brs(1)), bcdc.upper(brs(1)), bcdc.lower(brs(1)),
