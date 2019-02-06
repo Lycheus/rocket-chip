@@ -316,6 +316,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   alu.io.in2 := ex_op2.asUInt
   alu.io.in1 := ex_op1.asUInt
 
+  val smaddr = (((ex_op1.asUInt + ex_op2.asUInt) << 1) + csr.io.bounds.smbase + (ex_ctrl.bdhi.asUInt * (xLen / 8)))
+
   // multiplier and divider
   val div = Module(new MulDiv(if (pipelinedMul) mulDivParams.copy(mulUnroll = 0) else mulDivParams, width = xLen))
   div.io.req.valid := ex_reg_valid && ex_ctrl.div
@@ -471,7 +473,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
 
     when (ex_ctrl.rxs2 && (ex_ctrl.mem || ex_ctrl.rocc || ex_sfence)) {
       val typ = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_ctrl.mem_type)
-      mem_reg_rs2 := new StoreGen(typ, 0.U, ex_rs(1), coreDataBytes).data
+      val dat = Mux(ex_ctrl.sm, Mux(ex_ctrl.bdhi, bcdc.upper(ex_brs(1)), bcdc.lower(ex_brs(0))), ex_rs(1))
+      mem_reg_rs2 := new StoreGen(typ, 0.U, dat, coreDataBytes).data
     } .elsewhen (ex_ctrl.wbd) {
       mem_reg_rs2 := ex_rs(0)
     }
@@ -743,7 +746,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   io.dmem.req.bits.cmd  := ex_ctrl.mem_cmd
   io.dmem.req.bits.typ  := ex_ctrl.mem_type
   io.dmem.req.bits.phys := Bool(false)
-  io.dmem.req.bits.addr := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
+  io.dmem.req.bits.addr := Mux(ex_ctrl.sm, encodeVirtualAddress(ex_rs(0), smaddr), encodeVirtualAddress(ex_rs(0), alu.io.adder_out))
   io.dmem.invalidate_lr := wb_xcpt
   io.dmem.s1_data.data := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
   io.dmem.s1_kill := killm_common || mem_ldst_xcpt
@@ -789,18 +792,22 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     val brs = ex_brs.map{ b: UInt => RegNext(RegNext(b)) }
     val src = id_bnd_bypass_src.map{ b: Seq[UInt] => RegNext(RegNext(RegNext(b.foldLeft(0.U)(_##_.asUInt())))) }
     val byp = RegNext(RegNext(ex_reg_brs_bypass.foldLeft(0.U)(_##_.asUInt())(1,0)))
-    printf("C%d: %d [%d] [SM%d HI%d] [B%d P%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x) [SMB%x BE%d] [%b %b %b] [%x %x %x] [%x %x %x] [%x %x %x] [%x %x]\n",
+    printf("[%d] [SM%d HI%d] [SMA%x] [B%d P%d] DASM(%x) [SMB%x BE%d] [%b %b %b] [%x %x %x] [%x %x %x] [%x %x %x] [%x %x]\n",
+        csr.io.trace(0).valid && !csr.io.trace(0).exception, wb_ctrl.sm, wb_ctrl.bdhi, 
+        RegNext(RegNext(smaddr)), wb_ctrl.wbd, wb_reg_prop, csr.io.trace(0).insn,
+        csr.io.bounds.smbase, csr.io.bounds.bnden, byp, src(0), src(1),
+        bcdc.bounded(wb_reg_bound), bcdc.upper(wb_reg_bound), bcdc.lower(wb_reg_bound),
+        bcdc.bounded(brs(0)), bcdc.upper(brs(0)), bcdc.lower(brs(0)),
+        bcdc.bounded(brs(1)), bcdc.upper(brs(1)), bcdc.lower(brs(1)),
+        wb_reg_wdata, wb_reg_rs2)
+
+    printf("C%d: %d [%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
          io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception, 
-         wb_ctrl.sm, wb_ctrl.bdhi, wb_ctrl.wbd, wb_reg_prop, csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
+         csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
          Mux(rf_wen && !(wb_set_sboard && wb_wen), rf_waddr, UInt(0)), rf_wdata, rf_wen,
          wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
-         csr.io.trace(0).insn, csr.io.trace(0).insn, 
-         csr.io.bounds.smbase, csr.io.bounds.bnden, byp, src(0), src(1),
-         bcdc.bounded(wb_reg_bound), bcdc.upper(wb_reg_bound), bcdc.lower(wb_reg_bound),
-         bcdc.bounded(brs(0)), bcdc.upper(brs(0)), bcdc.lower(brs(0)),
-         bcdc.bounded(brs(1)), bcdc.upper(brs(1)), bcdc.lower(brs(1)),
-         wb_reg_wdata, wb_reg_rs2)
+         csr.io.trace(0).insn, csr.io.trace(0).insn)
   }
 
   PlusArg.timeout(
