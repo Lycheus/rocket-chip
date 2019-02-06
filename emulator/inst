@@ -1,0 +1,19 @@
+#!/usr/bin/python3
+
+from sys import argv
+
+widths = (7, 5, 5, 3, 5)
+
+def main():
+    inp = int(argv[1], base=16)
+    bst = bin(inp)[2:].zfill(32)
+
+    c = 0
+    for x in widths:
+        print(bst[c:c+x] + ' ', end='')
+        c += x
+
+    print(bst[c:])
+
+if __name__ == "__main__":
+    main()
