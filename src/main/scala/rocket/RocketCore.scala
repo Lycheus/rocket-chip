@@ -202,8 +202,10 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val ctrl_killd = Wire(Bool())
   val id_npc = (ibuf.io.pc.asSInt + ImmGen(IMM_UJ, id_inst(0))).asUInt
 
-  val brf = new RegFile(31, bcdc.width)
-  val id_brs = id_raddr.map(brf.read _)
+  val berf = new RegFile(31, 1)
+  val blrf = new RegFile(31, xLen)
+  val burf = new RegFile(31, xLen)
+  val id_brs = id_raddr.map( a => berf.read(a)##burf.read(a)##blrf.read(a) )
 
   val csr = Module(new CSRFile(perfEvents))
   val id_csr_en = id_ctrl.csr.isOneOf(CSR.S, CSR.C, CSR.W)
@@ -599,9 +601,18 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
 
   when (wb_valid) {
     when (wb_reg_prop) { 
-      brf.write(wb_waddr, wb_reg_bound) 
+      writeBrf(wb_waddr, wb_reg_bound) 
     } .elsewhen (wb_ctrl.wbd) { 
-      brf.write(wb_waddr, bcdc.encode(wb_reg_wdata, wb_reg_rs2))
+      when (wb_ctrl.sm) {
+        berf.write(wb_waddr, true.B)
+        when (wb_ctrl.bdhi) {
+          burf.write(wb_waddr, io.dmem.resp.bits.data(xLen-1, 0))
+        } .otherwise {
+          blrf.write(wb_waddr, io.dmem.resp.bits.data(xLen-1, 0))
+        }
+      } .otherwise {
+        writeBrf(wb_waddr, bcdc.encode(wb_reg_wdata, wb_reg_rs2))
+      }
     }
   }
 
@@ -833,6 +844,12 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     val a = a0.asSInt >> vaddrBits
     val msb = Mux(a === 0.S || a === -1.S, ea(vaddrBits), !ea(vaddrBits-1))
     Cat(msb, ea(vaddrBits-1,0))
+  }
+
+  def writeBrf(addr: UInt, v: UInt) = {
+    berf.write(addr, bcdc.bounded(v))
+    burf.write(addr, bcdc.upper(v))
+    blrf.write(addr, bcdc.lower(v))
   }
 
   class Scoreboard(n: Int, zero: Boolean = false)
