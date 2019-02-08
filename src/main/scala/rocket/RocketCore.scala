@@ -318,7 +318,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   alu.io.in2 := ex_op2.asUInt
   alu.io.in1 := ex_op1.asUInt
 
-  val smaddr = (((ex_op1.asUInt + ex_op2.asUInt) << 1) + csr.io.bounds.smbase + (ex_ctrl.bdhi.asUInt * (xLen / 8)))
+  // quick dirty hack
+  val smaddr = ((((ex_op1.asUInt & 0x7fffffff) + ex_op2.asUInt) << 1) + csr.io.bounds.smbase + (ex_ctrl.bdhi.asUInt * (xLen / 8)))
 
   // multiplier and divider
   val div = Module(new MulDiv(if (pipelinedMul) mulDivParams.copy(mulUnroll = 0) else mulDivParams, width = xLen))
@@ -420,8 +421,14 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val ex_slow_bypass = ex_ctrl.mem_cmd === M_XSC || Vec(MT_B, MT_BU, MT_H, MT_HU).contains(ex_ctrl.mem_type)
   val ex_sfence = Bool(usingVM) && ex_ctrl.mem && ex_ctrl.mem_cmd === M_SFENCE
 
+  val dmem_req_valid = ex_reg_valid && ex_ctrl.mem
+  val mem_non_sm_access = ex_ctrl.mem && !ex_ctrl.sm
+  val oob = bcdc.lower(ex_brs(0)) > alu.io.out || bcdc.upper(ex_brs(0)) < alu.io.out
+  val bounds_xcpt = csr.io.bounds.bnden && dmem_req_valid && mem_non_sm_access && oob
+
   val (ex_xcpt, ex_cause) = checkExceptions(List(
-    (ex_reg_xcpt_interrupt || ex_reg_xcpt, ex_reg_cause)))
+    (ex_reg_xcpt_interrupt || ex_reg_xcpt, ex_reg_cause),
+    (bounds_xcpt, Causes.out_of_bounds)))
 
   val exCoverCauses = idCoverCauses
   coverExceptions(ex_xcpt, ex_cause, "EXECUTE", exCoverCauses)
@@ -475,7 +482,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
 
     when (ex_ctrl.rxs2 && (ex_ctrl.mem || ex_ctrl.rocc || ex_sfence)) {
       val typ = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_ctrl.mem_type)
-      val dat = Mux(ex_ctrl.sm, Mux(ex_ctrl.bdhi, bcdc.upper(ex_brs(1)), bcdc.lower(ex_brs(0))), ex_rs(1))
+      val dat = Mux(ex_ctrl.sm, Mux(ex_ctrl.bdhi, bcdc.upper(ex_brs(1)), bcdc.lower(ex_brs(1))), ex_rs(1))
       mem_reg_rs2 := new StoreGen(typ, 0.U, dat, coreDataBytes).data
     } .elsewhen (ex_ctrl.wbd) {
       mem_reg_rs2 := ex_rs(0)
@@ -750,7 +757,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   io.fpu.dmem_resp_type := io.dmem.resp.bits.typ
   io.fpu.dmem_resp_tag := dmem_resp_waddr
 
-  io.dmem.req.valid     := ex_reg_valid && ex_ctrl.mem
+  io.dmem.req.valid     := dmem_req_valid && !bounds_xcpt
   val ex_dcache_tag = Cat(ex_waddr, ex_ctrl.fp)
   require(coreDCacheReqTagBits >= ex_dcache_tag.getWidth)
   io.dmem.req.bits.tag  := ex_dcache_tag
@@ -800,6 +807,14 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   else {
+    printf("C%d: %d [%d] [%d %x] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
+         io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception, 
+         csr.io.trace(0).exception, csr.io.trace(0).cause, csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
+         Mux(rf_wen && !(wb_set_sboard && wb_wen), rf_waddr, UInt(0)), rf_wdata, rf_wen,
+         wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
+         wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
+         csr.io.trace(0).insn, csr.io.trace(0).insn)
+
     val brs = ex_brs.map{ b: UInt => RegNext(RegNext(b)) }
     val src = id_bnd_bypass_src.map{ b: Seq[UInt] => RegNext(RegNext(RegNext(b.foldLeft(0.U)(_##_.asUInt())))) }
     val byp = RegNext(RegNext(ex_reg_brs_bypass.foldLeft(0.U)(_##_.asUInt())(1,0)))
@@ -811,14 +826,6 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
         bcdc.bounded(brs(0)), bcdc.upper(brs(0)), bcdc.lower(brs(0)),
         bcdc.bounded(brs(1)), bcdc.upper(brs(1)), bcdc.lower(brs(1)),
         wb_reg_wdata, wb_reg_rs2)
-
-    printf("C%d: %d [%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
-         io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception, 
-         csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
-         Mux(rf_wen && !(wb_set_sboard && wb_wen), rf_waddr, UInt(0)), rf_wdata, rf_wen,
-         wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
-         wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
-         csr.io.trace(0).insn, csr.io.trace(0).insn)
   }
 
   PlusArg.timeout(

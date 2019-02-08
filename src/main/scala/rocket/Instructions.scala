@@ -503,7 +503,7 @@ object CSRs {
   val mhpmcounter29h = 0xb9d
   val mhpmcounter30h = 0xb9e
   val mhpmcounter31h = 0xb9f
-  val bounds = 0x7c0
+  val bounds = 0x800
   val all = {
     val res = ArrayBuffer[Int]()
     res += fflags
