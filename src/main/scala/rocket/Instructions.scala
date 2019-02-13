@@ -503,7 +503,9 @@ object CSRs {
   val mhpmcounter29h = 0xb9d
   val mhpmcounter30h = 0xb9e
   val mhpmcounter31h = 0xb9f
-  val bounds = 0x800
+  val mbounds = 0x7c0
+  val sbounds = 0x5c0
+  val ubounds = 0x800
   val all = {
     val res = ArrayBuffer[Int]()
     res += fflags
@@ -654,7 +656,9 @@ object CSRs {
     res += marchid
     res += mimpid
     res += mhartid
-    res += bounds
+    res += mbounds
+    res += sbounds
+    res += ubounds
     res.toArray
   }
   val all32 = {

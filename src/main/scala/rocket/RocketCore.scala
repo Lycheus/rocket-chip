@@ -319,7 +319,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   alu.io.in1 := ex_op1.asUInt
 
   // quick dirty hack
-  val smaddr = ((((ex_op1.asUInt & 0x7fffffff) + ex_op2.asUInt) << 1) + csr.io.bounds.smbase + (ex_ctrl.bdhi.asUInt * (xLen / 8)))
+  val smaddr: UInt = (((ex_op1.asUInt & 0x7fffffff) + ex_op2.asUInt) << 1) + csr.io.bounds.smbase + (ex_ctrl.bdhi.asUInt * (xLen / 8))
 
   // multiplier and divider
   val div = Module(new MulDiv(if (pipelinedMul) mulDivParams.copy(mulUnroll = 0) else mulDivParams, width = xLen))
@@ -474,7 +474,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     mem_reg_inst := ex_reg_inst
     mem_reg_raw_inst := ex_reg_raw_inst
     mem_reg_pc := ex_reg_pc
-    mem_reg_wdata := alu.io.out
+    mem_reg_wdata := Mux(ex_ctrl.sm, smaddr(xLen-1, 0), alu.io.out)
     mem_br_taken := alu.io.cmp_out
 
     mem_reg_prop := bnd_prop_en
@@ -607,7 +607,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
 
   when (wb_valid) {
-    when (wb_reg_prop) { 
+    when (wb_reg_prop && csr.io.bounds.bnden) { 
       writeBrf(wb_waddr, wb_reg_bound) 
     } .elsewhen (wb_ctrl.wbd) { 
       when (wb_ctrl.sm) {
