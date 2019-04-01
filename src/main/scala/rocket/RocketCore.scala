@@ -422,9 +422,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val ex_sfence = Bool(usingVM) && ex_ctrl.mem && ex_ctrl.mem_cmd === M_SFENCE
 
   val dmem_req_valid = ex_reg_valid && ex_ctrl.mem
-  val mem_non_sm_access = ex_ctrl.mem && !ex_ctrl.sm
   val oob = bcdc.lower(ex_brs(0)) > alu.io.out || bcdc.upper(ex_brs(0)) < alu.io.out
-  val bounds_xcpt = csr.io.bounds.bnden && dmem_req_valid && mem_non_sm_access && oob
+  val bounds_xcpt = csr.io.bounds.bnden && dmem_req_valid && ex_ctrl.b_check && oob
 
   val (ex_xcpt, ex_cause) = checkExceptions(List(
     (ex_reg_xcpt_interrupt || ex_reg_xcpt, ex_reg_cause),
