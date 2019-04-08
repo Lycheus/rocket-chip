@@ -1,0 +1,26 @@
+#!/usr/bin/python3
+
+from sys import argv
+from re import search
+
+def main():
+  max = 0
+
+  with open(argv[1], 'r') as f:
+    for line in f:
+      match = search(r'\[SMB', line)
+      if match:
+        max = match.start(0) if match.start(0) > max else max
+
+  with open(argv[1], 'r') as f:
+    for line in f:
+      match = search(r'\[SMB', line)
+      if match:
+        start = line[:match.start(0)]
+        end = line[match.start(0):]
+        pad = (max - len(start)) * ' '
+        print(start + pad + end, end='')
+
+
+if __name__ == '__main__':
+  main()

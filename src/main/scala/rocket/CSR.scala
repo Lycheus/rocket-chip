@@ -63,6 +63,11 @@ class DCSR extends Bundle {
   val prv = UInt(width = PRV.SZ)
 }
 
+class BoundsCSR(implicit p: Parameters) extends CoreBundle()(p) {
+  val bnden = Bool()
+  val smbase = UInt(width=xLen - 1)
+}
+
 class MIP(implicit p: Parameters) extends CoreBundle()(p)
     with HasCoreParameters {
   val lip = Vec(coreParams.nLocalInterrupts, Bool())
@@ -208,6 +213,7 @@ class CSRFileIO(implicit p: Parameters) extends CoreBundle
   val counters = Vec(nPerfCounters, new PerfCounterIO)
   val inst = Vec(retireWidth, UInt(width = iLen)).asInput
   val trace = Vec(retireWidth, new TracedInstruction).asOutput
+  val bounds = new BoundsCSR().asOutput
 }
 
 class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Parameters) extends CoreModule()(p)
@@ -218,6 +224,13 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
   reset_mstatus.mpp := PRV.M
   reset_mstatus.prv := PRV.M
   val reg_mstatus = Reg(init=reset_mstatus)
+
+  /* BOUNDS REGS */
+  val reset_bounds = Wire(init=new BoundsCSR().fromBits(0))
+  val reg_ubounds = Reg(init=reset_bounds)
+  val reg_sbounds = Reg(init=reset_bounds)
+  val reg_mbounds = Reg(init=reset_bounds)
+  /* END BOUNDS REGS */
 
   val new_prv = Wire(init = reg_mstatus.prv)
   reg_mstatus.prv := legalizePrivilege(new_prv)
@@ -361,6 +374,31 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
     CSRs.mbadaddr -> reg_mbadaddr.sextTo(xLen),
     CSRs.mcause -> reg_mcause,
     CSRs.mhartid -> io.hartid)
+
+  /* BOUNDS */
+  def read_bounds(bound: BoundsCSR) = bound.asUInt()(xLen-1,0)
+  def write_bounds(v: UInt, r: BoundsCSR) = {
+    r.smbase := v(xLen-2,0) 
+    r.bnden  := v(xLen-1)
+  }
+
+  val bound_mapping = LinkedHashMap[Int,BoundsCSR](
+    PRV.M -> reg_mbounds)
+
+  read_mapping += CSRs.mbounds -> read_bounds(reg_mbounds)
+
+  if (usingVM) {
+    bound_mapping += PRV.S -> reg_sbounds
+    read_mapping += CSRs.sbounds -> read_bounds(reg_sbounds)
+  } 
+
+  if (usingUser) {
+    read_mapping += CSRs.ubounds -> read_bounds(reg_ubounds)
+    bound_mapping += PRV.U -> reg_ubounds
+  }
+
+  io.bounds := Mux1H(for ((k, v) <- bound_mapping) yield ((reg_mstatus.prv === k) -> v))
+  /* END BOUNDS */
 
   val debug_csrs = LinkedHashMap[Int,Bits](
     CSRs.dcsr -> reg_dcsr.asUInt,
@@ -754,6 +792,16 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
         pmp.addr := wdata
       }
     }
+
+    /* BOUNDS WRITE */
+    when (decoded_addr(CSRs.mbounds)) { write_bounds(wdata, reg_mbounds) }
+    if (usingVM) {
+      when (decoded_addr(CSRs.sbounds)) { write_bounds(wdata, reg_sbounds) }
+    }
+    if (usingUser) {
+      when (decoded_addr(CSRs.ubounds)) { write_bounds(wdata, reg_ubounds) }
+    }
+    /* END BOUNDS WRITE */
   }
 
   if (!usingVM) {
