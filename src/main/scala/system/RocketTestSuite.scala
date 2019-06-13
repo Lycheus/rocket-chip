@@ -98,6 +98,9 @@ run-$kind-tests-fast: $$(addprefix $$(output_dir)/, $$(addsuffix .run, $targets)
 }
 
 object DefaultTestSuites {
+  val boundsNames = LinkedHashSet("test")
+  val bounds = new AssemblyTestSuite("bounds", boundsNames)(_)
+
   val rv32uiNames = LinkedHashSet(
     "simple", "add", "addi", "and", "andi", "auipc", "beq", "bge", "bgeu", "blt", "bltu", "bne", "fence_i", 
     "jal", "jalr", "lb", "lbu", "lh", "lhu", "lui", "lw", "or", "ori", "sb", "sh", "sw", "sll", "slli",

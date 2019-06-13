@@ -75,7 +75,7 @@ class IntCtrlSigs extends Bundle {
 class BoundDecode(implicit val p: Parameters) extends DecodeConstants
 {
   val table: Array[(BitPat, List[BitPat])] = Array(
-    BNDR->      List(Y,N,N,N,N,N,Y,Y,A2_RS2, A1_RS1, IMM_X, DW_XPR,FN_ADD,   N,M_X,        MT_X, N,N,N,N,N,N,N,CSR.N,N,N,N,N,Y,N,N,N),
+    BNDR->      List(Y,N,N,N,N,N,Y,Y,A2_RS2, A1_RS1, IMM_X, DW_XPR,FN_X,     N,M_X,        MT_X, N,N,N,N,N,N,N,CSR.N,N,N,N,N,Y,N,N,N),
     BNDI->      List(Y,N,N,N,N,N,N,Y,A2_IMM, A1_RS1, IMM_I, DW_XPR,FN_ADD,   N,M_X,        MT_X, N,N,N,N,N,N,N,CSR.N,N,N,N,N,Y,N,N,N),
 
     LBDU->      List(Y,N,N,N,N,N,N,Y,A2_IMM, A1_RS1, IMM_I, DW_XPR,FN_ADD,   Y,M_XRD,      MT_D, N,N,N,N,N,N,N,CSR.N,N,N,N,N,Y,Y,Y,N),

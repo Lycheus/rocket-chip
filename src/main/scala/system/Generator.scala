@@ -63,6 +63,7 @@ object Generator extends GeneratorApp {
       } else {
         TestGeneration.addSuite(rv32udBenchmarks)
         TestGeneration.addSuites(env.map(rv64uf))
+        TestGeneration.addSuites(env.map(bounds))
         if (cfg.fLen >= 64)
           TestGeneration.addSuites(env.map(rv64ud))
       }
