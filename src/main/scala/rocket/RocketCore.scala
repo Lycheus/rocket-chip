@@ -605,17 +605,23 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
                  wb_reg_wdata))))
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
 
+  // bounds writeback
   when (wb_valid) {
+    // bounds propagation
     when (wb_reg_prop && csr.io.bounds.bnden) { 
       writeBrf(wb_waddr, wb_reg_bound) 
     } .elsewhen (wb_ctrl.wbd) { 
+      // bounds load
       when (wb_ctrl.sm) {
+        /*
         berf.write(wb_waddr, true.B)
         when (wb_ctrl.bdhi) {
           burf.write(wb_waddr, io.dmem.resp.bits.data(xLen-1, 0))
         } .otherwise {
           blrf.write(wb_waddr, io.dmem.resp.bits.data(xLen-1, 0))
         }
+        */
+      // bounds initialisation
       } .otherwise {
         writeBrf(wb_waddr, bcdc.encode(wb_reg_wdata, wb_reg_rs2))
       }

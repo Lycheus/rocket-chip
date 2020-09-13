@@ -78,8 +78,8 @@ class BoundDecode(implicit val p: Parameters) extends DecodeConstants
     BNDR->      List(Y,N,N,N,N,N,Y,Y,A2_RS2, A1_RS1, IMM_X, DW_XPR,FN_X,     N,M_X,        MT_X, N,N,N,N,N,N,N,CSR.N,N,N,N,N,Y,N,N,N),
     BNDI->      List(Y,N,N,N,N,N,N,Y,A2_IMM, A1_RS1, IMM_I, DW_XPR,FN_ADD,   N,M_X,        MT_X, N,N,N,N,N,N,N,CSR.N,N,N,N,N,Y,N,N,N),
 
-    LBDU->      List(Y,N,N,N,N,N,N,Y,A2_IMM, A1_RS1, IMM_I, DW_XPR,FN_ADD,   Y,M_XRD,      MT_D, N,N,N,N,N,N,N,CSR.N,N,N,N,N,Y,Y,Y,N),
-    LBDL->      List(Y,N,N,N,N,N,N,Y,A2_IMM, A1_RS1, IMM_I, DW_XPR,FN_ADD,   Y,M_XRD,      MT_D, N,N,N,N,N,N,N,CSR.N,N,N,N,N,Y,N,Y,N),
+    LBDU->      List(Y,N,N,N,N,N,N,Y,A2_IMM, A1_RS1, IMM_I, DW_XPR,FN_ADD,   Y,M_XRD,      MT_D, N,N,N,N,N,N,Y,CSR.N,N,N,N,N,Y,Y,Y,N),
+    LBDL->      List(Y,N,N,N,N,N,N,Y,A2_IMM, A1_RS1, IMM_I, DW_XPR,FN_ADD,   Y,M_XRD,      MT_D, N,N,N,N,N,N,Y,CSR.N,N,N,N,N,Y,N,Y,N),
     SBDU->      List(Y,N,N,N,N,N,Y,Y,A2_IMM, A1_RS1, IMM_S, DW_XPR,FN_ADD,   Y,M_XWR,      MT_D, N,N,N,N,N,N,N,CSR.N,N,N,N,N,N,Y,Y,N),
     SBDL->      List(Y,N,N,N,N,N,Y,Y,A2_IMM, A1_RS1, IMM_S, DW_XPR,FN_ADD,   Y,M_XWR,      MT_D, N,N,N,N,N,N,N,CSR.N,N,N,N,N,N,N,Y,N),
 
