@@ -422,7 +422,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val ex_sfence = Bool(usingVM) && ex_ctrl.mem && ex_ctrl.mem_cmd === M_SFENCE
 
   val dmem_req_valid = ex_reg_valid && ex_ctrl.mem
-  val oob = bcdc.lower(ex_brs(0)) > alu.io.out || bcdc.upper(ex_brs(0)) < alu.io.out
+  val oob = bcdc.lower(ex_brs(0)) > alu.io.out || bcdc.upper(ex_brs(0)) < alu.io.out //kenny this is where bound check happen
   val bounds_xcpt = csr.io.bounds.bnden && dmem_req_valid && ex_ctrl.b_check && oob
 
   val (ex_xcpt, ex_cause) = checkExceptions(List(
@@ -481,7 +481,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
 
     when (ex_ctrl.rxs2 && (ex_ctrl.mem || ex_ctrl.rocc || ex_sfence)) {
       val typ = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_ctrl.mem_type)
-      val dat = Mux(ex_ctrl.sm, Mux(ex_ctrl.bdhi, bcdc.upper(ex_brs(1)), bcdc.lower(ex_brs(1))), ex_rs(1))
+      val dat = Mux(ex_ctrl.sm, Mux(ex_ctrl.bdhi, bcdc.upper(ex_brs(1)), bcdc.lower(ex_brs(1))), ex_rs(1)) //kenny sbd data store happens here
       mem_reg_rs2 := new StoreGen(typ, 0.U, dat, coreDataBytes).data
     } .elsewhen (ex_ctrl.wbd) {
       mem_reg_rs2 := ex_rs(0)
@@ -609,21 +609,21 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   when (wb_valid) {
     // bounds propagation
     when (wb_reg_prop && csr.io.bounds.bnden) { 
-      writeBrf(wb_waddr, wb_reg_bound) 
+      propBrf(wb_waddr, wb_reg_bound) 
     } .elsewhen (wb_ctrl.wbd) { 
       // bounds load
-      when (wb_ctrl.sm) {
-        /*
+      // kenny lbdls and lbdlu can be re-enable here
+      when (wb_ctrl.sm && !wb_ctrl.wxd) {
         berf.write(wb_waddr, true.B)
         when (wb_ctrl.bdhi) {
           burf.write(wb_waddr, io.dmem.resp.bits.data(xLen-1, 0))
         } .otherwise {
           blrf.write(wb_waddr, io.dmem.resp.bits.data(xLen-1, 0))
         }
-        */
       // bounds initialisation
       } .otherwise {
-        writeBrf(wb_waddr, bcdc.encode(wb_reg_wdata, wb_reg_rs2))
+        //kenny bndr write to shadow register happen here?
+        compBrf(wb_waddr, bcdc.encode(wb_reg_wdata, wb_reg_rs2))
       }
     }
   }
@@ -812,6 +812,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   else {
+    /*
     printf("C%d: %d [%d] [%d %x] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
          io.hartid, csr.io.time(31,0), csr.io.trace(0).valid && !csr.io.trace(0).exception, 
          csr.io.trace(0).exception, csr.io.trace(0).cause, csr.io.trace(0).iaddr(vaddrBitsExtended-1, 0),
@@ -819,10 +820,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
          wb_reg_inst(19,15), Reg(next=Reg(next=ex_rs(0))),
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
          csr.io.trace(0).insn, csr.io.trace(0).insn)
-
+     */
     val brs = ex_brs.map{ b: UInt => RegNext(RegNext(b)) }
     val src = id_bnd_bypass_src.map{ b: Seq[UInt] => RegNext(RegNext(RegNext(b.foldLeft(0.U)(_##_.asUInt())))) }
     val byp = RegNext(RegNext(ex_reg_brs_bypass.foldLeft(0.U)(_##_.asUInt())(1,0)))
+/*
     printf("[%d] [SM%d HI%d] [SMA%x] [B%d P%d] DASM(%x) [SMB%x BE%d] [%b %b %b] [%x %x %x] [%x %x %x] [%x %x %x] [%x %x]\n",
         csr.io.trace(0).valid && !csr.io.trace(0).exception, wb_ctrl.sm, wb_ctrl.bdhi, 
         RegNext(RegNext(smaddr)), wb_ctrl.wbd, wb_reg_prop, csr.io.trace(0).insn,
@@ -831,6 +833,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
         bcdc.bounded(brs(0)), bcdc.upper(brs(0)), bcdc.lower(brs(0)),
         bcdc.bounded(brs(1)), bcdc.upper(brs(1)), bcdc.lower(brs(1)),
         wb_reg_wdata, wb_reg_rs2)
+ */
   }
 
   PlusArg.timeout(
@@ -858,10 +861,25 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     Cat(msb, ea(vaddrBits-1,0))
   }
 
+  /* kenny writeBrf are split into propagation and bndr (compression)
   def writeBrf(addr: UInt, v: UInt) = {
     berf.write(addr, bcdc.bounded(v))
     burf.write(addr, bcdc.upper(v))
     blrf.write(addr, bcdc.lower(v))
+  }
+   */
+
+  def propBrf(addr: UInt, v: UInt) = {
+    berf.write(addr, bcdc.bounded(v))
+    burf.write(addr, bcdc.upper(v))
+    blrf.write(addr, bcdc.lower(v))
+  }
+  def compBrf(addr: UInt, v: UInt) = {
+    berf.write(addr, bcdc.bounded(v))
+    burf.write(addr, bcdc.comp_upper(v))
+    blrf.write(addr, bcdc.comp_lower(v))
+    //printf("kenny: BNDR addr: %x \tinput: %x \tcompressed %x\n", addr, v, bcdc.comp_lower(v))
+    printf("kenny: BNDR\n")
   }
 
   class Scoreboard(n: Int, zero: Boolean = false)
@@ -884,12 +902,37 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   }
 }
 
+//kenny defines for metadata compression
+/* compression layout
+berf                upper                                lower 
+                   64 bits                              64 bits 
+----------------------------------------------------------------------------------- 
+|e|                   bound                 |               base                  | 
+----------------------------------------------------------------------------------- 
+    ____________________/      ____________/                   /                 /
+   /                 _________/           ____________________/                 /
+  /                 / ___________________/                                     /
+ /                 / /                   _____________________________________/
+/  32bits (1GB)   / /       32bits      /  
+------------------------------------------ 
+|    range        |        base          | 
+------------------------------------------ 
+63              32 31                   0  
+                    lower
+*/
+
+
 class BoundCodec(w: Int) {
   val width = 2*w + 1
+  val C_BASE_BIT = 32
+  val C_RNGE_BIT = 32
   def encode(upper: UInt, lower: UInt) = true.B##upper##lower
   def bounded(bound: UInt) = bound(width-1)
   def upper(bound: UInt) = bound(width-2, width-w-1)
   def lower(bound: UInt) = bound(width-w-2, 0)
+  //kenny add compression base/bound
+  def comp_upper(bound: UInt) = bound(width-2, width-w-1) //untouch for spatial
+  def comp_lower(bound: UInt) = bound(width-w+C_BASE_BIT-2, width-w-1)##bound(C_RNGE_BIT-1, 0)
   def propagate(brs1: UInt, brs2: UInt) = {
     Mux(bounded(brs1), Mux(bounded(brs2), 0.U, brs1), Mux(bounded(brs2), brs2, 0.U))
   }
