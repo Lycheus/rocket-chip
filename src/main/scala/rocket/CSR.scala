@@ -274,6 +274,7 @@ class CSRFile(perfEventSets: EventSets = new EventSets(Seq()))(implicit p: Param
     Causes.breakpoint,
     Causes.load_page_fault,
     Causes.store_page_fault,
+    Causes.out_of_bounds, //Tuo out of bound trap handling
     Causes.user_ecall).map(1 << _).sum)
 
   val reg_debug = Reg(init=Bool(false))

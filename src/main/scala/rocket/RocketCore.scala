@@ -422,7 +422,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   val ex_sfence = Bool(usingVM) && ex_ctrl.mem && ex_ctrl.mem_cmd === M_SFENCE
 
   val dmem_req_valid = ex_reg_valid && ex_ctrl.mem
-  val oob = bcdc.lower(ex_brs(0)) > alu.io.out || bcdc.upper(ex_brs(0)) < alu.io.out //kenny this is where bound check happen
+  //val oob = bcdc.lower(ex_brs(0)) > alu.io.out || bcdc.upper(ex_brs(0)) < alu.io.out //kenny this is where bound check happen
+  val oob = bcdc.dcomp_lower(ex_brs(0)) > alu.io.out || bcdc.dcomp_upper(ex_brs(0)) < alu.io.out //kenny this is where compress_bound check happen
   val bounds_xcpt = csr.io.bounds.bnden && dmem_req_valid && ex_ctrl.b_check && oob
 
   val (ex_xcpt, ex_cause) = checkExceptions(List(
@@ -482,6 +483,17 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     when (ex_ctrl.rxs2 && (ex_ctrl.mem || ex_ctrl.rocc || ex_sfence)) {
       val typ = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_ctrl.mem_type)
       val dat = Mux(ex_ctrl.sm, Mux(ex_ctrl.bdhi, bcdc.upper(ex_brs(1)), bcdc.lower(ex_brs(1))), ex_rs(1)) //kenny sbd data store happens here
+      when(ex_ctrl.sm && !ex_ctrl.wbd){
+        when(ex_ctrl.bdhi)
+        {
+          //sbdu
+          printf("SBDU PC:%x PTR:%x DAT:%x\n", mem_reg_pc, mem_reg_wdata, dat)
+        }.otherwise{
+          //sbdl
+          printf("SBDL PC:%x PTR:%x DAT:%x\n", mem_reg_pc, mem_reg_wdata, dat)
+        }
+      }
+
       mem_reg_rs2 := new StoreGen(typ, 0.U, dat, coreDataBytes).data
     } .elsewhen (ex_ctrl.wbd) {
       mem_reg_rs2 := ex_rs(0)
@@ -602,8 +614,31 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
                  Mux(ll_wen, ll_wdata,
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
                  Mux(wb_ctrl.mul, mul.map(_.io.resp.bits.data).getOrElse(wb_reg_wdata),
-                 wb_reg_wdata))))
-  when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
+                   wb_reg_wdata))))
+  //lbd write to GPR happens here
+
+  val decompressed_base = rf_wdata(31,0)
+  val decompressed_bound = UInt(32.W)##rf_wdata>>32
+  when (rf_wen) {
+    when (wb_ctrl.sm && wb_ctrl.wxd) //FIXME: wb_ctrl.wxd can be remove?
+    {
+      //kenny perform lbd decompression
+      //def dcomp_upper(bound: UInt) = bound(width-w+C_BASE_BIT-2, width-w-1)
+      //def dcomp_lower(bound: UInt) = bound(C_RNGE_BIT-1, 0)
+      when (wb_ctrl.decomp) {
+        //lbdu decompress rf_wdata upper half (bound) and writeback to RD
+        rf.write(rf_waddr, decompressed_bound)
+        printf("LBDU PC:%x RAW:%x BND:%x\n", wb_reg_pc, rf_wdata, decompressed_bound)
+      } .otherwise {
+        //lbdl decompress rf_wdata lower half (base) and writeback to RD
+        printf("LBDL PC:%x RAW:%x BAS:%x\n", wb_reg_pc, rf_wdata, decompressed_base)
+        rf.write(rf_waddr, decompressed_base)
+      }
+    } .otherwise {
+      //normal write back to register
+      rf.write(rf_waddr, rf_wdata)
+    }
+  }
 
   // bounds writeback
   when (wb_valid) {
@@ -878,8 +913,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     berf.write(addr, bcdc.bounded(v))
     burf.write(addr, bcdc.comp_upper(v))
     blrf.write(addr, bcdc.comp_lower(v))
-    //printf("kenny: BNDR addr: %x \tinput: %x \tcompressed %x\n", addr, v, bcdc.comp_lower(v))
-    printf("kenny: BNDR\n")
+    val base = bcdc.lower(v)
+    val bound = bcdc.upper(v)
+    val c_base = bcdc.comp_lower(v)
+    val c_bound = bcdc.comp_upper(v)
+    printf("BNDR PC:%x PTR:%x BAS:%x BND:%x CBAS:%x CBND:%x\n", wb_reg_pc, wb_reg_wdata, base, bound, c_base, c_bound)
   }
 
   class Scoreboard(n: Int, zero: Boolean = false)
@@ -933,6 +971,8 @@ class BoundCodec(w: Int) {
   //kenny add compression base/bound
   def comp_upper(bound: UInt) = bound(width-2, width-w-1) //untouch for spatial
   def comp_lower(bound: UInt) = bound(width-w+C_BASE_BIT-2, width-w-1)##bound(C_RNGE_BIT-1, 0)
+  def dcomp_upper(bound: UInt) = bound(width-w+C_BASE_BIT-2, width-w-1)
+  def dcomp_lower(bound: UInt) = bound(C_RNGE_BIT-1, 0)
   def propagate(brs1: UInt, brs2: UInt) = {
     Mux(bounded(brs1), Mux(bounded(brs2), 0.U, brs1), Mux(bounded(brs2), brs2, 0.U))
   }

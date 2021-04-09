@@ -1,0 +1,17 @@
+Compile the assembly
+./riscv-tools/riscv-tests/build/build.log:
+
+riscv64-unknown-elf-gcc -march=rv64g -mabi=lp64 -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles -I/home/lycheus/rocket-chip/riscv-tools/riscv-tests/build/../isa/../env/p -I/home/lycheus/rocket-chip/riscv-tools/riscv-tests/build/../isa/macros/scalar -T/home/lycheus/rocket-chip/riscv-tools/riscv-tests/build/../isa/../env/p/link.ld /home/lycheus/rocket-chip/riscv-tools/riscv-tests/build/../isa/rv64ua/amoadd_d.S -o rv64ua-p-amoadd_d
+
+riscv64-unknown-elf-gcc -march=rv64g -mabi=lp64 -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles -I/home/lycheus/rocket-chip/riscv-tools/riscv-tests/build/../isa/../env/p -I/home/lycheus/rocket-chip/riscv-tools/riscv-tests/build/../isa/macros/scalar -T/home/lycheus/rocket-chip/riscv-tools/riscv-tests/build/../isa/../env/p/link.ld /home/lycheus/rocket-chip/riscv-tools/riscv-tests/build/../isa/rv64ui/addi.S -o rv64ui-p-addi
+
+-I/home/lycheus/rocket-chip/riscv-tools/riscv-tests/env/p
+-T/home/lycheus/rocket-chip/riscv-tools/riscv-tests/env/p/link.ld
+
+
+Dump the object file
+./riscv-tools/riscv-tests/build/build.log:
+
+riscv64-unknown-elf-objdump --disassemble-all --disassemble-zeroes --section=.text --section=.text.startup --section=.text.init --section=.data rv64ua-p-amoadd_d > rv64ua-p-amoadd_d.dump
+
+riscv64-unknown-elf-objdump --disassemble-all --disassemble-zeroes --section=.text --section=.text.startup --section=.text.init --section=.data rv64ui-p-addi > rv64ui-p-addi.dump
