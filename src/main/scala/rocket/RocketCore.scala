@@ -482,7 +482,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
 
     when (ex_ctrl.rxs2 && (ex_ctrl.mem || ex_ctrl.rocc || ex_sfence)) {
       val typ = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_ctrl.mem_type)
-      val dat = Mux(ex_ctrl.sm, Mux(ex_ctrl.bdhi, bcdc.upper(ex_brs(1)), bcdc.lower(ex_brs(1))), ex_rs(1)) //kenny sbd data store happens here
+      val dat = Mux(ex_ctrl.sm, Mux(ex_ctrl.bdhi, bcdc.upper(ex_brs(1)), bcdc.lower(ex_brs(1))), ex_rs(1)) //kenny sbd data is here
+      /*
       when(ex_ctrl.sm && !ex_ctrl.wbd){
         when(ex_ctrl.bdhi)
         {
@@ -493,7 +494,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
           printf("SBDL PC:%x PTR:%x DAT:%x\n", mem_reg_pc, mem_reg_wdata, dat)
         }
       }
-
+       */
       mem_reg_rs2 := new StoreGen(typ, 0.U, dat, coreDataBytes).data
     } .elsewhen (ex_ctrl.wbd) {
       mem_reg_rs2 := ex_rs(0)
@@ -618,7 +619,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   //lbd write to GPR happens here
 
   val decompressed_base = rf_wdata(31,0)
-  val decompressed_bound = UInt(32.W)##rf_wdata>>32
+  val decompressed_bound = rf_wdata>>32
   when (rf_wen) {
     when (wb_ctrl.sm && wb_ctrl.wxd) //FIXME: wb_ctrl.wxd can be remove?
     {
@@ -628,11 +629,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
       when (wb_ctrl.decomp) {
         //lbdu decompress rf_wdata upper half (bound) and writeback to RD
         rf.write(rf_waddr, decompressed_bound)
-        printf("LBDU PC:%x RAW:%x BND:%x\n", wb_reg_pc, rf_wdata, decompressed_bound)
+        //printf("LBDU PC:%x RAW:%x BND:%x\n", wb_reg_pc, rf_wdata, decompressed_bound)
       } .otherwise {
         //lbdl decompress rf_wdata lower half (base) and writeback to RD
-        printf("LBDL PC:%x RAW:%x BAS:%x\n", wb_reg_pc, rf_wdata, decompressed_base)
         rf.write(rf_waddr, decompressed_base)
+        //printf("LBDL PC:%x RAW:%x BAS:%x\n", wb_reg_pc, rf_wdata, decompressed_base)
       }
     } .otherwise {
       //normal write back to register
@@ -917,7 +918,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     val bound = bcdc.upper(v)
     val c_base = bcdc.comp_lower(v)
     val c_bound = bcdc.comp_upper(v)
-    printf("BNDR PC:%x PTR:%x BAS:%x BND:%x CBAS:%x CBND:%x\n", wb_reg_pc, wb_reg_wdata, base, bound, c_base, c_bound)
+    //kenny print BNDR with compressed base/bound
+    //printf("BNDR PC:%x PTR:%x BAS:%x BND:%x CBAS:%x CBND:%x\n", wb_reg_pc, wb_reg_wdata, base, bound, c_base, c_bound)
   }
 
   class Scoreboard(n: Int, zero: Boolean = false)
